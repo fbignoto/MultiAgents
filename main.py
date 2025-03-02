@@ -12,9 +12,11 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import json
 from datetime import datetime
+import subprocess
+import time
 
 # Adiciona o diretório tools ao PYTHONPATH
-tools_path = os.path.join(os.path.dirname(__file__), 'tools')
+tools_path = os.path.join(os.path.dirname(__file__), 'tools/processamento_de_dados')
 sys.path.append(tools_path)
 
 # Carrega as variáveis de ambiente
@@ -29,7 +31,51 @@ CACHE_SIZE = 100  # Limitando o tamanho do cache
 BASE_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = BASE_DIR / 'results'
 RESULTS_DIR.mkdir(exist_ok=True)
+
 print(f"Pasta 'results' criada/verificada em: {RESULTS_DIR}")
+
+def ensure_mongodb_running():
+    """Verifica se o MongoDB está rodando e inicia se necessário"""
+    try:
+        # Tenta conectar ao MongoDB
+        client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=2000)
+        client.server_info()
+        print("MongoDB já está rodando")
+        client.close()
+        return True
+    except Exception:
+        print("MongoDB não está rodando. Tentando iniciar...")
+        try:
+            # Tenta iniciar o MongoDB
+            subprocess.run(['sudo', 'systemctl', 'start', 'mongod'], check=True)
+            
+            # Espera alguns segundos para o serviço iniciar
+            time.sleep(5)
+            
+            # Verifica se iniciou com sucesso
+            client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=2000)
+            client.server_info()
+            print("MongoDB iniciado com sucesso")
+            client.close()
+            return True
+        except subprocess.CalledProcessError:
+            print("Erro ao iniciar MongoDB via systemctl. Tentando método alternativo...")
+            try:
+                # Tenta iniciar via comando mongod
+                subprocess.Popen(['mongod', '--dbpath', '/var/lib/mongodb'], 
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+                time.sleep(5)
+                
+                # Verifica se iniciou
+                client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=2000)
+                client.server_info()
+                print("MongoDB iniciado com sucesso (método alternativo)")
+                client.close()
+                return True
+            except Exception as e:
+                print(f"Erro ao iniciar MongoDB: {str(e)}")
+                return False
 
 @lru_cache(maxsize=CACHE_SIZE)
 def get_internal_loan(ccb_number: str, loans_collection) -> Dict:
@@ -155,6 +201,66 @@ def get_summary(inconsistencies: List[Dict], date: str) -> str:
     
     return summary
 
+def save_general_report(daily_summary: Dict, total_loans: Dict):
+    """Salva um relatório geral com estatísticas de todas as inconsistências"""
+    general_stats = {
+        'total_registros': {
+            'open': total_loans['open'],
+            'settled': total_loans['settled'],
+            'stock': total_loans['stock']
+        },
+        'inconsistencias_por_tipo': {
+            'Status Inconsistente': 0,
+            'Conflito Estoque/Liquidação': 0,
+            'Não Encontrado': 0
+        },
+        'porcentagem_por_tipo': {
+            'Status Inconsistente': 0.0,
+            'Conflito Estoque/Liquidação': 0.0,
+            'Não Encontrado': 0.0
+        }
+    }
+
+    # Calcular totais por tipo de inconsistência
+    for date_stats in daily_summary.values():
+        for tipo, quantidade in date_stats['by_type'].items():
+            general_stats['inconsistencias_por_tipo'][tipo] += quantidade
+
+    # Calcular porcentagens
+    total_settled = total_loans['settled']
+    if total_settled > 0:
+        for tipo, quantidade in general_stats['inconsistencias_por_tipo'].items():
+            general_stats['porcentagem_por_tipo'][tipo] = (quantidade / total_settled) * 100
+
+    # Gerar relatório em formato texto
+    report = "Relatório Geral de Inconsistências\n"
+    report += "=" * 40 + "\n\n"
+    
+    report += "Total de Registros por Base:\n"
+    report += f"- Base Interna (open): {general_stats['total_registros']['open']:,}\n"
+    report += f"- Base de Liquidações: {general_stats['total_registros']['settled']:,}\n"
+    report += f"- Base de Estoque: {general_stats['total_registros']['stock']:,}\n\n"
+    
+    report += "Total de Inconsistências por Tipo:\n"
+    for tipo, quantidade in general_stats['inconsistencias_por_tipo'].items():
+        report += f"- {tipo}: {quantidade:,}\n"
+    
+    report += "\nPorcentagem de Inconsistências (em relação ao total de liquidações):\n"
+    for tipo, porcentagem in general_stats['porcentagem_por_tipo'].items():
+        report += f"- {tipo}: {porcentagem:.2f}%\n"
+
+    # Salvar relatório em JSON
+    filepath = RESULTS_DIR / "general_report.json"
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(general_stats, f, indent=2, ensure_ascii=False)
+
+    # Salvar relatório em texto
+    filepath_txt = RESULTS_DIR / "general_report.txt"
+    with open(filepath_txt, 'w', encoding='utf-8') as f:
+        f.write(report)
+
+    return report
+
 def compare_databases() -> str:
     """Compara os dados entre os bancos para encontrar inconsistências, agrupando por dia"""
     try:
@@ -166,13 +272,20 @@ def compare_databases() -> str:
         
         # Collections
         loans = db_open['loans']
-        settled = db_investment['settled_loans']
-        stock = db_investment['current_loans']
+        settled = db_investment['liquidated']
+        stock = db_investment['stock']
         
         # Criar índices para otimizar as consultas
         loans.create_index([("ccb_number", ASCENDING)])
         settled.create_index([("DOCUMENTO", ASCENDING)])
         stock.create_index([("NU_DOCUMENTO", ASCENDING)])
+        
+        # Contar total de registros em cada base
+        total_loans = {
+            'open': loans.count_documents({}),
+            'settled': settled.count_documents({}),
+            'stock': stock.count_documents({})
+        }
         
         # Dicionário para contagem de inconsistências por dia
         daily_summary = {}
@@ -273,7 +386,10 @@ def compare_databases() -> str:
         # Fechar cursor
         cursor.close()
         
-        # Gerar relatório final
+        # Gerar relatório geral
+        general_report = save_general_report(daily_summary, total_loans)
+        
+        # Gerar relatório final (diário)
         final_report = "Relatório de Inconsistências por Dia:\n\n"
         for date in sorted(daily_summary.keys()):
             summary = daily_summary[date]
@@ -284,6 +400,9 @@ def compare_databases() -> str:
                 final_report += f"- {tipo}: {quantidade}\n"
             final_report += f"Resultados completos salvos em: results/inconsistencies_{date}.json\n\n"
         
+        # Adicionar relatório geral ao final
+        final_report += "\n" + general_report
+        
         client.close()
         return final_report
         
@@ -292,6 +411,14 @@ def compare_databases() -> str:
 
 def main():
     try:
+        # Carregar variáveis de ambiente
+        load_dotenv()
+
+        # Verificar se o MongoDB está rodando antes de prosseguir
+        if not ensure_mongodb_running():
+            print("Não foi possível iniciar o MongoDB. Encerrando...")
+            return
+
         # Criando as ferramentas para processamento
         processing_tools = [
             Tool(

@@ -39,4 +39,4 @@ env/
 
 # Data files and results
 data/*.csv
-results/*.json
+results/*
