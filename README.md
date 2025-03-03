@@ -3,18 +3,37 @@
 ## Visão Geral
 Este projeto implementa um sistema multi-agente usando CrewAI para analisar dados de empréstimos em diferentes bancos de dados. O sistema processa dados internos, empréstimos liquidados e dados de estoque atual para identificar inconsistências e gerar relatórios.
 
+## Agentes do Sistema
+
+O sistema possui dois agentes principais:
+
+1. **Engenheiro de Dados**
+   - Responsável por transformar dados de arquivos CSV
+   - Cria representações no banco de dados MongoDB
+
+2. **Analista de Dados**
+   - Compara os bancos para encontrar inconsistências
+   - Gera relatórios de análise
+
 ## Estrutura do Projeto
 ```
 001_MultiAgents/
 ├── data/                        # Diretório de arquivos de dados
-│   ├── internal_data_*.csv 
-│   ├── liquidated.csv      
-│   └── stock.csv           
+│   ├── internal_data_*.csv      
+│   ├── liquidated.csv          
+│   └── stock.csv               
 ├── docs/                        # Documentação
-│   ├── estrategia.md       
-│   └── pdi.md              
+│   ├── estrategia.md          
+│   └── pdi.md                
 ├── results/                     # Resultados da análise
-│   └── inconsistencies_*.json
+│   ├── internal_inconsistencies/ # Inconsistências entre Liquidated e Internal
+│   │   ├── general_report.json
+│   │   ├── general_report.txt
+│   │   └── inconsistencies_*.json
+│   └── stock_inconsistencies/   # Inconsistências entre Liquidated e Stock
+│       ├── general_report.json
+│       ├── general_report.txt
+│       └── inconsistencies_*.json
 ├── tools/processamento_de_dados # Scripts de processamento
 │   ├── script_internal_data.py
 │   ├── script_liquidated.py
@@ -23,39 +42,66 @@ Este projeto implementa um sistema multi-agente usando CrewAI para analisar dado
 └── requirements.txt             # Dependências Python
 ```
 
-## Funcionalidades
-- Processamento de dados de múltiplas fontes (dados internos, liquidados e estoque)
-- Integração com MongoDB para armazenamento de dados
-- Detecção automatizada de inconsistências entre bases de dados
-- Geração de relatórios diários de inconsistências
-- Sistema multi-agente usando CrewAI para delegação e execução de tarefas
+## Lógica de Análise
+
+### Comparação entre Liquidated e Internal
+- Base Liquidated: `investment_funds.liquidated`
+- Base Internal: `open.loans`
+
+### Comparação entre Liquidated e Stock
+- Base Liquidated: `investment_funds.liquidated`
+- Base Stock: `investment_funds.stock`
 
 ## Requisitos
-- Python 3
+- Python 3.x
 - MongoDB
-- Pacotes Python necessários (ver requirements.txt)
+- Dependências Python listadas em requirements.txt:
+  - crewai==0.19.0
+  - langchain==0.1.5
+  - openai==1.12.0
+  - python-dotenv==1.0.1
+  - duckduckgo-search==4.2
+  - pandas==2.2.0
+  - pymongo==4.6.1
 
-## Instalação
-1. Clone o repositório
+## Instalação e Configuração
+
+1. Clone o repositório:
+```bash
+git clone https://github.com/fbignoto/MultiAgents.git
+```
+
 2. Instale as dependências:
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Uso
-Execute o script principal para processar e analisar os dados:
+
+Execute o script principal:
 ```bash
 python main.py
 ```
 
-O script irá:
-1. Processar dados internos de empréstimos
-2. Processar dados de empréstimos liquidados
-3. Processar dados de estoque atual
-4. Analisar inconsistências entre as bases de dados
-5. Gerar relatórios no diretório results
 
-## Saída
-Os resultados são salvos em formato JSON no diretório 'results', organizados por comparações e data:
-- inconsistencies_YYYYMMDD.json
+## Relatórios Gerados
+
+Os relatórios são organizados em duas categorias principais na pasta `results`:
+
+1. **internal_inconsistencies/**
+   - Inconsistências entre Liquidated e Internal
+   - Relatórios diários em formato JSON
+   - Relatório geral em JSON e TXT
+
+2. **stock_inconsistencies/**
+   - Inconsistências entre Liquidated e Stock
+   - Relatórios diários em formato JSON
+   - Relatório geral em JSON e TXT
+
+## Observações Importantes
+
+- O sistema verifica automaticamente o status do MongoDB
+- Será solicitada a senha do MongoDB quando necessário
+- Os relatórios são gerados diariamente e consolidados
+- O projeto está em desenvolvimento contínuo com melhorias planejadas
 
