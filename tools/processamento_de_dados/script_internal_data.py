@@ -126,11 +126,11 @@ try:
         print("Índices criados com sucesso")
 
         # Mostrar um exemplo dos dados inseridos para validação
-        print("\nExemplo do primeiro registro inserido:")
-        primeiro_registro = collection.find_one()
-        for key, value in primeiro_registro.items():
-            if key != '_id':  # Não mostrar o ID do MongoDB
-                print(f"{key}: {value}")
+        # print("\nExemplo do primeiro registro inserido:")
+        # primeiro_registro = collection.find_one()
+        # for key, value in primeiro_registro.items():
+        #     if key != '_id':  # Não mostrar o ID do MongoDB
+        #         print(f"{key}: {value}")
 
     else:
         print("Nenhum arquivo foi processado com sucesso")
