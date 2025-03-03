@@ -94,6 +94,7 @@ def process_batch(batch_data: List, func) -> List:
         results.extend(list(executor.map(func, batch_data)))
     return results
 
+# Funções de processamento de dados
 def process_internal_data() -> str:
     """Processa os dados internos do sistema"""
     try:
@@ -133,6 +134,7 @@ def process_stock_data() -> str:
     except Exception as e:
         return f"Erro ao processar dados de estoque: {str(e)}"
 
+# Funções de análise de dados
 def check_loan_inconsistency(loan: Dict, loans_collection, stock_collection) -> List[Dict]:
     """Verifica inconsistências para um empréstimo específico"""
     inconsistencies = []
@@ -141,7 +143,7 @@ def check_loan_inconsistency(loan: Dict, loans_collection, stock_collection) -> 
     internal_loan = get_internal_loan(loan['DOCUMENTO'], loans_collection)
     
     if internal_loan:
-        if internal_loan['contract_status'] != 'PAID':
+        if internal_loan['contract_status'] != 'FULLY_PAID':
             inconsistencies.append({
                 'tipo': 'Status Inconsistente',
                 'documento': loan['DOCUMENTO'],
@@ -166,9 +168,13 @@ def check_loan_inconsistency(loan: Dict, loans_collection, stock_collection) -> 
     
     return inconsistencies
 
-def save_inconsistencies_batch(inconsistencies: List[Dict], date: str):
-    """Salva um lote de inconsistências em um arquivo JSON, organizado por data"""
-    filepath = RESULTS_DIR / f"inconsistencies_{date}.json"
+def save_inconsistencies_batch(inconsistencies: List[Dict], date: str, comparison_type: str):
+    """Salva um lote de inconsistências em um arquivo JSON, organizado por data e tipo de comparação"""
+    # Criar diretórios se não existirem
+    base_dir = RESULTS_DIR / comparison_type
+    base_dir.mkdir(exist_ok=True)
+    
+    filepath = base_dir / f"inconsistencies_{date}.json"
     
     # Verifica se o arquivo já existe
     existing_data = []
@@ -201,7 +207,7 @@ def get_summary(inconsistencies: List[Dict], date: str) -> str:
     
     return summary
 
-def save_general_report(daily_summary: Dict, total_loans: Dict):
+def save_general_report(daily_summary: Dict, total_loans: Dict, report_type: str):
     """Salva um relatório geral com estatísticas de todas as inconsistências"""
     general_stats = {
         'total_registros': {
@@ -209,21 +215,15 @@ def save_general_report(daily_summary: Dict, total_loans: Dict):
             'settled': total_loans['settled'],
             'stock': total_loans['stock']
         },
-        'inconsistencias_por_tipo': {
-            'Status Inconsistente': 0,
-            'Conflito Estoque/Liquidação': 0,
-            'Não Encontrado': 0
-        },
-        'porcentagem_por_tipo': {
-            'Status Inconsistente': 0.0,
-            'Conflito Estoque/Liquidação': 0.0,
-            'Não Encontrado': 0.0
-        }
+        'inconsistencias_por_tipo': {},
+        'porcentagem_por_tipo': {}
     }
 
     # Calcular totais por tipo de inconsistência
     for date_stats in daily_summary.values():
         for tipo, quantidade in date_stats['by_type'].items():
+            if tipo not in general_stats['inconsistencias_por_tipo']:
+                general_stats['inconsistencias_por_tipo'][tipo] = 0
             general_stats['inconsistencias_por_tipo'][tipo] += quantidade
 
     # Calcular porcentagens
@@ -233,7 +233,7 @@ def save_general_report(daily_summary: Dict, total_loans: Dict):
             general_stats['porcentagem_por_tipo'][tipo] = (quantidade / total_settled) * 100
 
     # Gerar relatório em formato texto
-    report = "Relatório Geral de Inconsistências\n"
+    report = f"Relatório de Inconsistências - {report_type}\n"
     report += "=" * 40 + "\n\n"
     
     report += "Total de Registros por Base:\n"
@@ -250,16 +250,81 @@ def save_general_report(daily_summary: Dict, total_loans: Dict):
         report += f"- {tipo}: {porcentagem:.2f}%\n"
 
     # Salvar relatório em JSON
-    filepath = RESULTS_DIR / "general_report.json"
+    base_dir = RESULTS_DIR / f"{report_type}_inconsistencies"
+    base_dir.mkdir(exist_ok=True)
+    
+    filepath = base_dir / "general_report.json"
     with open(filepath, 'w', encoding='utf-8') as f:
         json.dump(general_stats, f, indent=2, ensure_ascii=False)
 
     # Salvar relatório em texto
-    filepath_txt = RESULTS_DIR / "general_report.txt"
+    filepath_txt = base_dir / "general_report.txt"
     with open(filepath_txt, 'w', encoding='utf-8') as f:
         f.write(report)
 
     return report
+
+# Funções de comparação de bancos
+def compare_internal_liquidated(loan: Dict, loans_collection, daily_summary: Dict, date_str: str) -> List[Dict]:
+    """Verifica inconsistências entre base liquidada e base interna"""
+    current_inconsistencies = []
+    
+    ccb_number = loan.get('DOCUMENTO')
+    if not ccb_number:
+        return []
+        
+    # Verificar na base interna
+    internal_loan = get_internal_loan(ccb_number, loans_collection)
+    if internal_loan:
+        if internal_loan['contract_status'] != 'FULLY_PAID':
+            inc = {
+                'tipo': 'Status Inconsistente',
+                'documento': ccb_number,
+                'status_liquidacao': 'LIQUIDADO',
+                'status_interno': internal_loan['contract_status'],
+                'data_movimento': loan.get('DATA_MOVIMENTO').isoformat()
+            }
+            current_inconsistencies.append(inc)
+            daily_summary[date_str]['total'] += 1
+            daily_summary[date_str]['by_type'].setdefault('Status Inconsistente', 0)
+            daily_summary[date_str]['by_type']['Status Inconsistente'] += 1
+    else:
+        inc = {
+            'tipo': 'Não Encontrado',
+            'documento': ccb_number,
+            'detalhes': 'Empréstimo liquidado não encontrado na base interna',
+            'data_movimento': loan.get('DATA_MOVIMENTO').isoformat()
+        }
+        current_inconsistencies.append(inc)
+        daily_summary[date_str]['total'] += 1
+        daily_summary[date_str]['by_type'].setdefault('Não Encontrado', 0)
+        daily_summary[date_str]['by_type']['Não Encontrado'] += 1
+    
+    return current_inconsistencies
+
+def compare_stock_liquidated(loan: Dict, stock_collection, daily_summary: Dict, date_str: str) -> List[Dict]:
+    """Verifica inconsistências entre base liquidada e estoque"""
+    current_inconsistencies = []
+    
+    ccb_number = loan.get('DOCUMENTO')
+    if not ccb_number:
+        return []
+        
+    # Verificar no estoque
+    stock_loan = get_stock_loan(ccb_number, stock_collection)
+    if stock_loan:
+        inc = {
+            'tipo': 'Conflito Estoque/Liquidação',
+            'documento': ccb_number,
+            'detalhes': 'Empréstimo consta como liquidado mas ainda está no estoque',
+            'data_movimento': loan.get('DATA_MOVIMENTO').isoformat()
+        }
+        current_inconsistencies.append(inc)
+        daily_summary[date_str]['total'] += 1
+        daily_summary[date_str]['by_type'].setdefault('Conflito Estoque/Liquidação', 0)
+        daily_summary[date_str]['by_type']['Conflito Estoque/Liquidação'] += 1
+    
+    return current_inconsistencies
 
 def compare_databases() -> str:
     """Compara os dados entre os bancos para encontrar inconsistências, agrupando por dia"""
@@ -287,21 +352,19 @@ def compare_databases() -> str:
             'stock': stock.count_documents({})
         }
         
-        # Dicionário para contagem de inconsistências por dia
-        daily_summary = {}
+        # Dicionários para contagem de inconsistências por dia
+        daily_summary_internal = {}
+        daily_summary_stock = {}
         
         # Processar em lotes menores
         cursor = settled.find(no_cursor_timeout=True).batch_size(BATCH_SIZE)
         total_processed = 0
-        current_batch = []
+        current_batch_internal = []
+        current_batch_stock = []
         current_date = None
         
         print("Processando empréstimos liquidados...")
         for loan in cursor:
-            ccb_number = loan.get('DOCUMENTO')
-            if not ccb_number:
-                continue
-            
             # Extrair a data do movimento
             movement_date = loan.get('DATA_MOVIMENTO')
             if not movement_date:
@@ -309,66 +372,37 @@ def compare_databases() -> str:
                 
             date_str = movement_date.strftime("%Y%m%d")
             
-            # Inicializar contadores para o dia
-            if date_str not in daily_summary:
-                daily_summary[date_str] = {
-                    'total': 0,
-                    'by_type': {}
-                }
-            
-            # Lista para armazenar inconsistências do registro atual
-            current_inconsistencies = []
-            
-            # Verificar na base interna
-            internal_loan = get_internal_loan(ccb_number, loans)
-            if internal_loan:
-                if internal_loan['contract_status'] != 'PAID':
-                    inc = {
-                        'tipo': 'Status Inconsistente',
-                        'documento': ccb_number,
-                        'status_liquidacao': 'LIQUIDADO',
-                        'status_interno': internal_loan['contract_status'],
-                        'data_movimento': movement_date.isoformat()
+            # Inicializar contadores para o dia em ambos os sumários
+            for summary in [daily_summary_internal, daily_summary_stock]:
+                if date_str not in summary:
+                    summary[date_str] = {
+                        'total': 0,
+                        'by_type': {}
                     }
-                    current_inconsistencies.append(inc)
-                    daily_summary[date_str]['total'] += 1
-                    daily_summary[date_str]['by_type'].setdefault('Status Inconsistente', 0)
-                    daily_summary[date_str]['by_type']['Status Inconsistente'] += 1
-            else:
-                inc = {
-                    'tipo': 'Não Encontrado',
-                    'documento': ccb_number,
-                    'detalhes': 'Empréstimo liquidado não encontrado na base interna',
-                    'data_movimento': movement_date.isoformat()
-                }
-                current_inconsistencies.append(inc)
-                daily_summary[date_str]['total'] += 1
-                daily_summary[date_str]['by_type'].setdefault('Não Encontrado', 0)
-                daily_summary[date_str]['by_type']['Não Encontrado'] += 1
             
-            # Verificar no estoque
-            stock_loan = get_stock_loan(ccb_number, stock)
-            if stock_loan:
-                inc = {
-                    'tipo': 'Conflito Estoque/Liquidação',
-                    'documento': ccb_number,
-                    'detalhes': 'Empréstimo consta como liquidado mas ainda está no estoque',
-                    'data_movimento': movement_date.isoformat()
-                }
-                current_inconsistencies.append(inc)
-                daily_summary[date_str]['total'] += 1
-                daily_summary[date_str]['by_type'].setdefault('Conflito Estoque/Liquidação', 0)
-                daily_summary[date_str]['by_type']['Conflito Estoque/Liquidação'] += 1
+            # Verificar inconsistências com base interna
+            internal_inconsistencies = compare_internal_liquidated(
+                loan, loans, daily_summary_internal, date_str
+            )
             
-            # Se mudou a data ou o lote está cheio, salva o lote atual
-            if current_date != date_str or len(current_batch) >= BATCH_SIZE:
-                if current_batch:
-                    save_inconsistencies_batch(current_batch, current_date)
-                    current_batch = []
+            # Verificar inconsistências com estoque
+            stock_inconsistencies = compare_stock_liquidated(
+                loan, stock, daily_summary_stock, date_str
+            )
+            
+            # Se mudou a data ou o lote está cheio, salva os lotes atuais
+            if current_date != date_str or len(current_batch_internal) >= BATCH_SIZE:
+                if current_batch_internal:
+                    save_inconsistencies_batch(current_batch_internal, current_date, "internal_inconsistencies")
+                if current_batch_stock:
+                    save_inconsistencies_batch(current_batch_stock, current_date, "stock_inconsistencies")
+                current_batch_internal = []
+                current_batch_stock = []
                 current_date = date_str
             
-            # Adiciona inconsistências ao lote atual
-            current_batch.extend(current_inconsistencies)
+            # Adiciona inconsistências aos lotes atuais
+            current_batch_internal.extend(internal_inconsistencies)
+            current_batch_stock.extend(stock_inconsistencies)
             
             total_processed += 1
             if total_processed % 500 == 0:
@@ -377,31 +411,27 @@ def compare_databases() -> str:
                 get_internal_loan.cache_clear()
                 get_stock_loan.cache_clear()
         
-        # Salva o último lote se houver
-        if current_batch and current_date:
-            save_inconsistencies_batch(current_batch, current_date)
+        # Salva os últimos lotes se houver
+        if current_batch_internal and current_date:
+            save_inconsistencies_batch(current_batch_internal, current_date, "internal_inconsistencies")
+        if current_batch_stock and current_date:
+            save_inconsistencies_batch(current_batch_stock, current_date, "stock_inconsistencies")
         
         print(f"Total de {total_processed} empréstimos processados")
         
         # Fechar cursor
         cursor.close()
         
-        # Gerar relatório geral
-        general_report = save_general_report(daily_summary, total_loans)
+        # Gerar relatórios separados para cada tipo de comparação
+        general_report_internal = save_general_report(daily_summary_internal, total_loans, "internal")
+        general_report_stock = save_general_report(daily_summary_stock, total_loans, "stock")
         
-        # Gerar relatório final (diário)
-        final_report = "Relatório de Inconsistências por Dia:\n\n"
-        for date in sorted(daily_summary.keys()):
-            summary = daily_summary[date]
-            final_report += f"Data: {date}\n"
-            final_report += f"Total de inconsistências: {summary['total']}\n"
-            final_report += "Resumo por tipo:\n"
-            for tipo, quantidade in summary['by_type'].items():
-                final_report += f"- {tipo}: {quantidade}\n"
-            final_report += f"Resultados completos salvos em: results/inconsistencies_{date}.json\n\n"
-        
-        # Adicionar relatório geral ao final
-        final_report += "\n" + general_report
+        # Gerar relatório final combinado
+        final_report = "Relatório de Inconsistências:\n\n"
+        final_report += "=== Inconsistências com Base Interna ===\n"
+        final_report += general_report_internal
+        final_report += "\n\n=== Inconsistências com Base de Estoque ===\n"
+        final_report += general_report_stock
         
         client.close()
         return final_report
@@ -409,9 +439,9 @@ def compare_databases() -> str:
     except Exception as e:
         return f"Erro ao comparar bancos de dados: {str(e)}"
 
+# Função principal
 def main():
     try:
-        # Carregar variáveis de ambiente
         load_dotenv()
 
         # Verificar se o MongoDB está rodando antes de prosseguir

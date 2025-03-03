@@ -1,8 +1,9 @@
 # Tools
 [x] Processar e salvar dados em um banco
-[x] Cruzar dados diariamentes
-[x] Verificar inconsistências
-[x] Mostrar inconsistências
+
+[x] Cruzar dados por dia
+[x] Verificar inconsistências por dia
+[x] Mostrar inconsistências por dia
 
 # Agents
 [x] Engenheiro de dados

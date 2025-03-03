@@ -6,21 +6,21 @@ Este projeto implementa um sistema multi-agente usando CrewAI para analisar dado
 ## Estrutura do Projeto
 ```
 001_MultiAgents/
-├── data/                    # Diretório de arquivos de dados
-│   ├── internal_data_*.csv  # Arquivos de dados internos
-│   ├── liquidated.csv       # Dados de empréstimos liquidados
-│   └── stock.csv           # Dados de estoque atual
-├── docs/                    # Documentação
-│   ├── estrategia.md       # Documentação da estratégia
-│   └── pdi.md              # Documentação do projeto
-├── results/                 # Resultados da análise
+├── data/                        # Diretório de arquivos de dados
+│   ├── internal_data_*.csv 
+│   ├── liquidated.csv      
+│   └── stock.csv           
+├── docs/                        # Documentação
+│   ├── estrategia.md       
+│   └── pdi.md              
+├── results/                     # Resultados da análise
 │   └── inconsistencies_*.json
-├── tools/                   # Scripts de processamento
+├── tools/processamento_de_dados # Scripts de processamento
 │   ├── script_internal_data.py
 │   ├── script_liquidated.py
 │   └── script_stock.py
-├── main.py                 # Arquivo principal
-└── requirements.txt        # Dependências Python
+├── main.py                      # Arquivo principal
+└── requirements.txt             # Dependências Python
 ```
 
 ## Funcionalidades
@@ -31,7 +31,7 @@ Este projeto implementa um sistema multi-agente usando CrewAI para analisar dado
 - Sistema multi-agente usando CrewAI para delegação e execução de tarefas
 
 ## Requisitos
-- Python 3.10+
+- Python 3
 - MongoDB
 - Pacotes Python necessários (ver requirements.txt)
 
@@ -41,7 +41,6 @@ Este projeto implementa um sistema multi-agente usando CrewAI para analisar dado
 ```bash
 pip install -r requirements.txt
 ```
-3. Certifique-se que o MongoDB está rodando localmente na porta padrão (27017)
 
 ## Uso
 Execute o script principal para processar e analisar os dados:
@@ -56,34 +55,7 @@ O script irá:
 4. Analisar inconsistências entre as bases de dados
 5. Gerar relatórios no diretório results
 
-## Fluxo de Processamento de Dados
-1. Processamento de Dados Internos
-   - Lê e combina múltiplos arquivos CSV
-   - Converte tipos de dados e formatos
-   - Armazena no banco de dados 'open' do MongoDB
-
-2. Processamento de Empréstimos Liquidados
-   - Processa dados de empréstimos liquidados
-   - Armazena no banco de dados 'investment_funds' do MongoDB
-
-3. Processamento de Dados de Estoque
-   - Processa informações de estoque atual
-   - Armazena no banco de dados 'investment_funds' do MongoDB
-
-4. Análise de Inconsistências
-   - Compara dados entre as bases
-   - Identifica inconsistências
-   - Gera relatórios diários
-
 ## Saída
-Os resultados são salvos em formato JSON no diretório 'results', organizados por data:
+Os resultados são salvos em formato JSON no diretório 'results', organizados por comparações e data:
 - inconsistencies_YYYYMMDD.json
 
-Cada relatório contém:
-- Inconsistências de status
-- Conflitos entre estoque/liquidação
-- Registros não encontrados
-- Informações detalhadas para cada inconsistência
-
-## Status do Projeto
-Em desenvolvimento ativo
